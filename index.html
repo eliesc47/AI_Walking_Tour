@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Audio Tour</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding: 20px; margin: 0; background-color: #f5f6fa; }
+        button { padding: 18px 20px; font-size: 20px; font-weight: bold; cursor: pointer; border-radius: 12px; border: none; margin: 10px auto; width: 100%; max-width: 320px; display: block; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        select { padding: 12px; font-size: 16px; border-radius: 8px; margin: 15px auto; width: 100%; max-width: 320px; display: block; }
+        
+        .radar-btn { background-color: #f39c12; color: white; }
+        .find-btn { background-color: #ff4757; color: white; display: none; }
+        .audio-btn { background-color: #1e90ff; color: white; display: none; }
+        .talk-btn { background-color: #9b59b6; color: white; display: none; }
+        
+        #radarScreen { margin-top: 15px; padding: 15px; border-radius: 8px; background: #2c3e50; color: #ecf0f1; font-family: monospace; display: none; }
+        .good-gps { color: #2ecc71; font-weight: bold; }
+        .bad-gps { color: #e74c3c; font-weight: bold; }
+        
+        #status { font-size: 16px; color: #7f8c8d; font-weight: bold; margin-top: 15px; }
+        #output { margin-top: 20px; padding: 20px; border-radius: 8px; background: white; box-shadow: 0 4px 6px rgba(0,0,0,0.05); text-align: left; line-height: 1.6; font-size: 18px; min-height: 100px; }
+    </style>
+</head>
+<body>
+
+    <h1>AI Tour Guide</h1>
+    
+    <button id="radarBtn" class="radar-btn" onclick="startRadar()">📡 1. Turn On GPS Radar</button>
+    
+    <div id="radarScreen">
+        <div>Lat: <span id="latDisplay">--</span></div>
+        <div>Lon: <span id="lonDisplay">--</span></div>
+        <div style="margin-top: 10px;">Accuracy: <span id="accDisplay">--</span></div>
+    </div>
+
+    <div id="overrideContainer" style="display: none;">
+        <select id="locationOverride">
+            <option value="">-- Use Live GPS Coordinates --</option>
+            <option value="40.7739,-73.9568">Force: 79th St (Between 2nd & 3rd)</option>
+            <option value="40.7744,-73.9585">Force: 79th St (Between 3rd & Lex)</option>
+        </select>
+    </div>
+
+    <button id="findBtn" class="find-btn" onclick="executeBackendLookup()">📍 2. Scan This Area</button>
+    
+    <button id="listenBtn" class="audio-btn" onclick="playAudio()">🔊 Read Aloud</button>
+    <button id="talkBtn" class="talk-btn" onclick="startVoiceInput()">🎤 Ask a Question</button>
+    
+    <div id="status">Status: Waiting to start.</div>
+    <div id="output">Your tour commentary will appear here...</div>
+
+    <script>
+        let currentScript = "";
+        let recognition = null;
+        let gpsWatchId = null;
+        let bestLat = null;
+        let bestLon = null;
+
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+
+            recognition.onstart = () => { document.getElementById('status').textContent = "Listening... Speak now."; };
+            
+            recognition.onresult = (event) => {
+                const textResult = event.results[0][0].transcript;
+                document.getElementById('output').textContent = `You asked: "${textResult}"\n\nThinking...`;
+                sendVoiceMessage(textResult);
+            };
+            
+            recognition.onerror = (e) => { document.getElementById('status').textContent = `Mic Error: [${e.error}].`; };
+            recognition.onend = () => { if(document.getElementById('status').textContent.includes("Listening")) document.getElementById('status').textContent = "Mic closed."; };
+        }
+
+        function startRadar() {
+            document.getElementById('radarBtn').style.display = 'none';
+            document.getElementById('radarScreen').style.display = 'block';
+            document.getElementById('overrideContainer').style.display = 'block';
+            document.getElementById('findBtn').style.display = 'block';
+            document.getElementById('status').textContent = "Warming up GPS hardware...";
+            
+            if ("geolocation" in navigator) {
+                const locationOptions = { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 };
+
+                gpsWatchId = navigator.geolocation.watchPosition((position) => {
+                    bestLat = position.coords.latitude;
+                    bestLon = position.coords.longitude;
+                    const accuracy = position.coords.accuracy;
+                    
+                    document.getElementById('latDisplay').textContent = bestLat.toFixed(5);
+                    document.getElementById('lonDisplay').textContent = bestLon.toFixed(5);
+                    
+                    const accElement = document.getElementById('accDisplay');
+                    accElement.textContent = accuracy.toFixed(0) + " meters";
+                    
+                    if (accuracy > 40) {
+                        accElement.className = 'bad-gps';
+                        document.getElementById('status').textContent = "Waiting for satellite lock...";
+                    } else {
+                        accElement.className = 'good-gps';
+                        document.getElementById('status').textContent = "Strong GPS signal acquired. Ready to scan.";
+                    }
+                }, (err) => {
+                    document.getElementById('status').textContent = `GPS Error: ${err.message}`;
+                }, locationOptions);
+            } else {
+                alert("GPS not supported.");
+            }
+        }
+
+        function executeBackendLookup() {
+            // Check the dropdown first
+            const overrideValue = document.getElementById('locationOverride').value;
+            let finalLat = bestLat;
+            let finalLon = bestLon;
+
+            if (overrideValue !== "") {
+                const coords = overrideValue.split(',');
+                finalLat = parseFloat(coords[0]);
+                finalLon = parseFloat(coords[1]);
+                document.getElementById('status').textContent = "Using overridden coordinates...";
+            } else if (!finalLat || !finalLon) {
+                alert("Wait for the radar to find your coordinates first, or select an override!");
+                return;
+            } else {
+                document.getElementById('status').textContent = "Target acquired. Searching Wikipedia...";
+            }
+            
+            document.getElementById('listenBtn').style.display = 'none';
+            document.getElementById('talkBtn').style.display = 'none';
+            
+            fetch('/api/location', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ latitude: finalLat, longitude: finalLon })
+            })
+            .then(res => res.json())
+            .then(data => {
+                currentScript = data.script;
+                document.getElementById('output').textContent = currentScript;
+                document.getElementById('status').textContent = "Success.";
+                
+                document.getElementById('listenBtn').style.display = 'block';
+                document.getElementById('talkBtn').style.display = 'block';
+            })
+            .catch(err => {
+                document.getElementById('status').textContent = "Error connecting to server.";
+            });
+        }
+
+        function sendVoiceMessage(text) {
+            document.getElementById('status').textContent = "Thinking...";
+            document.getElementById('listenBtn').style.display = 'none';
+
+            fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: text })
+            })
+            .then(res => res.json())
+            .then(data => {
+                currentScript = data.script;
+                document.getElementById('output').textContent = currentScript;
+                document.getElementById('status').textContent = "Ready.";
+                document.getElementById('listenBtn').style.display = 'block';
+            })
+            .catch(err => { document.getElementById('status').textContent = "Server failed."; });
+        }
+
+        function playAudio() {
+            if (!currentScript) return;
+            window.speechSynthesis.cancel(); 
+            let utterance = new SpeechSynthesisUtterance(currentScript);
+            document.getElementById('status').textContent = "Reading...";
+            utterance.onend = () => { document.getElementById('status').textContent = "Finished."; };
+            window.speechSynthesis.speak(utterance);
+        }
+
+        function startVoiceInput() {
+            if (recognition) {
+                window.speechSynthesis.cancel();
+                try { recognition.start(); } 
+                catch(e) { recognition.stop(); setTimeout(() => { recognition.start(); }, 300); }
+            } else {
+                document.getElementById('status').textContent = "Browser unsupported.";
+            }
+        }
+    </script>
+</body>
+</html>
