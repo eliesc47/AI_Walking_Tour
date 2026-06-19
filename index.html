@@ -168,6 +168,11 @@
             document.getElementById('listenBtn').style.display = 'none';
             document.getElementById('talkBtn').style.display = 'none';
             
+            // Disable the explore button so you can't double-tap it
+            const exploreBtn = document.getElementById('exploreBtn');
+            exploreBtn.disabled = true;
+            exploreBtn.style.opacity = "0.5";
+            
             fetch('/api/location', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -176,20 +181,37 @@
             .then(res => res.json())
             .then(data => {
                 currentScript = data.script;
-                document.getElementById('output').textContent = currentScript;
-                document.getElementById('status').textContent = "Success.";
                 
-                document.getElementById('listenBtn').style.display = 'block';
-                document.getElementById('talkBtn').style.display = 'block';
+                // Catch the rate limit error so the AI doesn't read the code out loud
+                if (currentScript.includes("429")) {
+                    document.getElementById('output').textContent = "Whoa, slow down! You hit the AI speed limit. Please wait 60 seconds.";
+                    document.getElementById('status').textContent = "Rate Limited.";
+                } else {
+                    document.getElementById('output').textContent = currentScript;
+                    document.getElementById('status').textContent = "Success.";
+                    document.getElementById('listenBtn').style.display = 'block';
+                    document.getElementById('talkBtn').style.display = 'block';
+                }
+                
+                // Re-enable the button
+                exploreBtn.disabled = false;
+                exploreBtn.style.opacity = "1";
             })
             .catch(err => {
                 document.getElementById('status').textContent = "Error connecting to server.";
+                exploreBtn.disabled = false;
+                exploreBtn.style.opacity = "1";
             });
         }
 
         function sendVoiceMessage(text) {
             document.getElementById('status').textContent = "Thinking...";
             document.getElementById('listenBtn').style.display = 'none';
+            document.getElementById('talkBtn').style.display = 'none';
+
+            const exploreBtn = document.getElementById('exploreBtn');
+            exploreBtn.disabled = true;
+            exploreBtn.style.opacity = "0.5";
 
             fetch('/api/chat', {
                 method: 'POST',
@@ -199,11 +221,25 @@
             .then(res => res.json())
             .then(data => {
                 currentScript = data.script;
-                document.getElementById('output').textContent = currentScript;
-                document.getElementById('status').textContent = "Ready.";
-                document.getElementById('listenBtn').style.display = 'block';
+                
+                if (currentScript.includes("429")) {
+                    document.getElementById('output').textContent = "Whoa, slow down! You hit the AI speed limit. Please wait 60 seconds.";
+                    document.getElementById('status').textContent = "Rate Limited.";
+                } else {
+                    document.getElementById('output').textContent = currentScript;
+                    document.getElementById('status').textContent = "Ready.";
+                    document.getElementById('listenBtn').style.display = 'block';
+                    document.getElementById('talkBtn').style.display = 'block';
+                }
+                
+                exploreBtn.disabled = false;
+                exploreBtn.style.opacity = "1";
             })
-            .catch(err => { document.getElementById('status').textContent = "Server failed."; });
+            .catch(err => { 
+                document.getElementById('status').textContent = "Server failed."; 
+                exploreBtn.disabled = false;
+                exploreBtn.style.opacity = "1";
+            });
         }
 
         function playAudio() {
