@@ -199,6 +199,12 @@
             })
             .catch(err => {
                 document.getElementById('status').textContent = "Error connecting to server.";
+                // NEW: Erase "Thinking" and tell the user what happened
+                document.getElementById('output').textContent = "Connection dropped. Check your cell service and try again.";
+                // NEW: Bring the buttons back
+                document.getElementById('listenBtn').style.display = 'block';
+                document.getElementById('talkBtn').style.display = 'block';
+                const exploreBtn = document.getElementById('exploreBtn');
                 exploreBtn.disabled = false;
                 exploreBtn.style.opacity = "1";
             });
