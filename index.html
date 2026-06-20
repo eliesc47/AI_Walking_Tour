@@ -57,7 +57,6 @@
         let bestLat = null;
         let bestLon = null;
         
-        // Variables to remember the exact location of your last scan
         let lastScannedLat = null;
         let lastScannedLon = null;
 
@@ -78,6 +77,21 @@
             
             recognition.onerror = (e) => { document.getElementById('status').textContent = `Mic Error: [${e.error}].`; };
             recognition.onend = () => { if(document.getElementById('status').textContent.includes("Listening")) document.getElementById('status').textContent = "Mic closed."; };
+        }
+
+        // Network Request Retry Handler
+        async function fetchWithRetry(url, options, retries = 3, delay = 1000) {
+            try {
+                const response = await fetch(url, options);
+                if (!response.ok && response.status === 503) {
+                    throw new Error("503");
+                }
+                return response;
+            } catch (err) {
+                if (retries <= 1) throw err;
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return fetchWithRetry(url, options, retries - 1, delay * 1.5);
+            }
         }
 
         function startRadar() {
@@ -116,7 +130,6 @@
             }
         }
 
-        // Mathematical formula to calculate distance between two GPS coordinates
         function getDistanceFromLatLonInMeters(lat1, lon1, lat2, lon2) {
             const R = 6371e3; 
             const dLat = (lat2 - lat1) * (Math.PI / 180);
@@ -128,7 +141,6 @@
             return R * c; 
         }
 
-        // The smart click handler
         function handleExploreClick() {
             let currentLat = bestLat;
             let currentLon = bestLon;
@@ -148,16 +160,13 @@
             if (lastScannedLat !== null && lastScannedLon !== null) {
                 const distance = getDistanceFromLatLonInMeters(lastScannedLat, lastScannedLon, currentLat, currentLon);
                 
-                // If moved less than 60 meters, trigger the "Next Landmark" logic
                 if (distance < 60) {
                     document.getElementById('status').textContent = "Same block detected. Finding next landmark...";
-                    // Explicit instruction to prevent repeating the same landmark in this session
                     sendVoiceMessage("We are still on the same block. Tell me about the NEXT closest landmark from your list. CRITICAL RULE: You must NOT describe any landmark you have already mentioned in this conversation.");
                     return; 
                 }
             }
 
-            // If we moved more than 60 meters (or it's the first scan), do a full fresh lookup
             lastScannedLat = currentLat;
             lastScannedLon = currentLon;
             executeBackendLookup(currentLat, currentLon);
@@ -168,12 +177,11 @@
             document.getElementById('listenBtn').style.display = 'none';
             document.getElementById('talkBtn').style.display = 'none';
             
-            // Disable the explore button so you can't double-tap it
             const exploreBtn = document.getElementById('exploreBtn');
             exploreBtn.disabled = true;
             exploreBtn.style.opacity = "0.5";
             
-            fetch('/api/location', {
+            fetchWithRetry('/api/location', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ latitude: finalLat, longitude: finalLon })
@@ -182,7 +190,6 @@
             .then(data => {
                 currentScript = data.script;
                 
-                // Catch the rate limit error so the AI doesn't read the code out loud
                 if (currentScript.includes("429")) {
                     document.getElementById('output').textContent = "Whoa, slow down! You hit the AI speed limit. Please wait 60 seconds.";
                     document.getElementById('status').textContent = "Rate Limited.";
@@ -193,18 +200,14 @@
                     document.getElementById('talkBtn').style.display = 'block';
                 }
                 
-                // Re-enable the button
                 exploreBtn.disabled = false;
                 exploreBtn.style.opacity = "1";
             })
             .catch(err => {
                 document.getElementById('status').textContent = "Error connecting to server.";
-                // NEW: Erase "Thinking" and tell the user what happened
                 document.getElementById('output').textContent = "Connection dropped. Check your cell service and try again.";
-                // NEW: Bring the buttons back
                 document.getElementById('listenBtn').style.display = 'block';
                 document.getElementById('talkBtn').style.display = 'block';
-                const exploreBtn = document.getElementById('exploreBtn');
                 exploreBtn.disabled = false;
                 exploreBtn.style.opacity = "1";
             });
@@ -219,7 +222,7 @@
             exploreBtn.disabled = true;
             exploreBtn.style.opacity = "0.5";
 
-            fetch('/api/chat', {
+            fetchWithRetry('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ text: text })
@@ -243,12 +246,9 @@
             })
             .catch(err => { 
                 document.getElementById('status').textContent = "Server failed."; 
-                // NEW: Erase "Thinking" and tell the user what happened
                 document.getElementById('output').textContent = "Connection dropped. Check your cell service and try again.";
-                // NEW: Bring the buttons back
                 document.getElementById('listenBtn').style.display = 'block';
                 document.getElementById('talkBtn').style.display = 'block';
-                const exploreBtn = document.getElementById('exploreBtn');
                 exploreBtn.disabled = false;
                 exploreBtn.style.opacity = "1";
             });
