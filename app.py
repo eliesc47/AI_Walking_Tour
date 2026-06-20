@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 from flask import Flask, jsonify, request
 
@@ -35,18 +36,16 @@ def get_prominent_wikipedia_places(lat, lon, radius=250):
         "gslimit": 50,  
         "format": "json"
     }
-    # WIKIPEDIA STRICTLY REQUIRES THIS TO NOT BLOCK YOU
     headers = {
         "User-Agent": "AITourGuideTest/1.0"
     }
     try:
         response = requests.get(url, params=params, headers=headers)
-        response.raise_for_status() # This forces Python to recognize 403/404 errors
+        response.raise_for_status() 
         data = response.json()
         places = data.get("query", {}).get("geosearch", [])
         return [place["title"] for place in places]
     except Exception as e:
-        # If it fails, print the exact reason to the terminal!
         print(f"\n[Wikipedia API Error]: {e}")
         return []
 
@@ -68,7 +67,6 @@ def generate_voice_response(prompt_text, is_follow_up=False):
     
     messages.append(types.Content(role="user", parts=[types.Part.from_text(text=prompt_text)]))
     
-    # Using Python triple-quotes prevents syntax errors for multi-line strings
     system_instruction = """
     You are an expert NYC walking tour guide, acting like the Wikipedia places tab. Be historical, direct, and avoid flowery language. Aim for exactly 3-4 sentences.
 
@@ -82,18 +80,34 @@ def generate_voice_response(prompt_text, is_follow_up=False):
     if is_follow_up:
         system_instruction += " Answer the user's specific question about the street or building they are looking at."
 
-    try:
-        response = client.models.generate_content(
-            model='gemini-3.5-flash',
-            contents=messages,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=0.4, # Lowered temperature to heavily discourage hallucinations
+    # Robust Retry & Exponential Backoff Loop
+    max_retries = 3
+    delay = 1 
+
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model='gemini-3.5-flash',
+                contents=messages,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    temperature=0.4,
+                )
             )
-        )
-        return response.text
-    except Exception as e:
-        return f"Error: {str(e)}"
+            return response.text
+        except Exception as e:
+            error_msg = str(e).lower()
+            print(f"[Gemini API Attempt {attempt + 1} Failed]: {e}")
+            
+            # If it's a transient overload error or network glitch, wait and try again
+            if "503" in error_msg or "unavailable" in error_msg or "resource_exhausted" in error_msg:
+                if attempt < max_retries - 1:
+                    time.sleep(delay)
+                    delay *= 2  # Wait 1s, then 2s
+                    continue
+            
+            # Return a clean user-facing string if all retries are exhausted
+            return "The AI servers are running slow right now. Please tap the button again in a moment."
 
 @app.route('/api/location', methods=['POST'])
 def handle_location():
